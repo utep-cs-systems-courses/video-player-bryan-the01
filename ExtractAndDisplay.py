@@ -1,71 +1,46 @@
 #!/usr/bin/env python3
 
 import threading
-import cv2
-import numpy as np
-import base64
-import queue
+from ExtractFrames import extract_frames
+from ConvertToGrayscale import convert_to_grayscale
+from DisplayFrames import display_frames
 
-def extractFrames(fileName, outputBuffer, maxFramesToLoad=9999):
-    # Initialize frame count 
-    count = 0
+#globals
+BUFFER_SIZE = 10
+MAX_FRAMES = 72
+CLIP_FILE = 'clip.mp4'
 
-    # open video file
-    vidcap = cv2.VideoCapture(fileName)
-
-    # read first image
-    success,image = vidcap.read()
+def main():
+    print("[MAIN] Program started.")
     
-    print(f'Reading frame {count} {success}')
-    while success and count < maxFramesToLoad:
-        # get a jpg encoded frame
-        success, jpgImage = cv2.imencode('.jpg', image)
+    # For input buffer (between extractor and grayscale)
+    buffer1 = []
+    empty1 = threading.Semaphore(BUFFER_SIZE)
+    full1  = threading.Semaphore(0)
+    mutex1 = threading.Lock()
+    
+    # For output buffer (between grayscale and display)
+    buffer2 = []
+    empty2 = threading.Semaphore(BUFFER_SIZE)
+    full2  = threading.Semaphore(0)
+    mutex2 = threading.Lock()
 
-        #encode the frame as base 64 to make debugging easier
-        jpgAsText = base64.b64encode(jpgImage)
+    # Create thread for each function
+    t1 = threading.Thread(target=extract_frames, args=(CLIP_FILE, buffer1, empty1, full1, mutex1, MAX_FRAMES))
+    t2 = threading.Thread(target=convert_to_grayscale, args=(buffer1, full1, empty1, mutex1, buffer2, full2, empty2, mutex2))
+    t3 = threading.Thread(target=display_frames, args=(buffer2, full2, empty2, mutex2))
+    
+    # Start frames concurrently
+    t1.start()
+    t2.start()
+    t3.start()
 
-        # add the frame to the buffer
-        outputBuffer.put(image)
-       
-        success,image = vidcap.read()
-        print(f'Reading frame {count} {success}')
-        count += 1
+    # Wait for thread 1 to finish, then thread 2, then thread 3
+    t1.join()
+    t2.join()
+    t3.join()
+    print("Threads finished successfully")
 
-    print('Frame extraction complete')
-
-
-def displayFrames(inputBuffer):
-    # initialize frame count
-    count = 0
-
-    # go through each frame in the buffer until the buffer is empty
-    while not inputBuffer.empty():
-        # get the next frame
-        frame = inputBuffer.get()
-
-        print(f'Displaying frame {count}')        
-
-        # display the image in a window called "video" and wait 42ms
-        # before displaying the next frame
-        cv2.imshow('Video', frame)
-        if cv2.waitKey(42) and 0xFF == ord("q"):
-            break
-
-        count += 1
-
-    print('Finished displaying all frames')
-    # cleanup the windows
-    cv2.destroyAllWindows()
-
-# filename of clip to load
-filename = 'clip.mp4'
-
-# shared queue  
-extractionQueue = queue.Queue()
-
-# extract the frames
-extractFrames(filename,extractionQueue, 72)
-
-# display the frames
-displayFrames(extractionQueue)
-
+    
+if __name__ == "__main__":
+    main()

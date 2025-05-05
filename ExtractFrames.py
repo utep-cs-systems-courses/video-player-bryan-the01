@@ -2,29 +2,40 @@
 
 import cv2
 import os
-# globals
-outputDir    = 'frames'
-clipFileName = 'clip.mp4'
-# initialize frame count
-count = 0
+import threading
 
-# open the video clip
-vidcap = cv2.VideoCapture(clipFileName)
 
-# create the output directory if it doesn't exist
-if not os.path.exists(outputDir):
-  print(f"Output directory {outputDir} didn't exist, creating")
-  os.makedirs(outputDir)
+def extract_frames(clipFileName, buffer, empty, full, mutex, max_frames=72):
+    count = 0
+    vidcap = cv2.VideoCapture(clipFileName)
 
-# read one frame
-success,image = vidcap.read()
+    # Read first frame
+    data, frame = vidcap.read()
+    print("[Extract] Thread started.")
+    while data and count < max_frames:
 
-print(f'Reading frame {count} {success}')
-while success and count < 72:
+        # Wait for input buffer, and lock empty mutex
+        empty.acquire()
+        mutex.acquire()
 
-  # write the current frame out as a jpeg image
-  cv2.imwrite(f"{outputDir}/frame_{count:04d}.bmp", image)   
+        # Push frame into shared buffer
+        buffer.append(frame)
+        print(f'Extracting frame {count}')
 
-  success,image = vidcap.read()
-  print(f'Reading frame {count}')
-  count += 1
+        # Unlock buffer, and release full semaphore (for ConvertToGrayscale.py)
+        mutex.release()
+        full.release()
+
+        # Read frames until None
+        count += 1
+        data, frame = vidcap.read()
+
+    vidcap.release()
+    print('[Extractor] Done extracting frames')
+
+    # Last acquire/release for end of stream frame
+    empty.acquire()
+    mutex.acquire()
+    buffer.append(None)
+    mutex.release()
+    full.release()
